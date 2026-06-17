@@ -24,9 +24,11 @@ jobs:
           
           Write-Host "Installing GCC and libsodium..."
           C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium --noconfirm
+          
+          Write-Host "Adding MinGW to PATH..."
+          $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
 
       - name: Build DLL and Static Library
-        # 关键：将工作目录切换到 src 文件夹
         working-directory: ./src
         run: |
           # 创建 build 文件夹（现在在 src 目录下）

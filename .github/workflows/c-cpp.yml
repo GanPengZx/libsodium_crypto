@@ -76,3 +76,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install libsodium
+
+      - name: Build Libraries
+        run: |
+          mkdir -p build
+          clang -dynamiclib -I./include src/libsodium_crypto.c -o build/libsodium_crypto.dylib -lsodium
+          clang -c -I./include src/libsodium_crypto.c -o build/libsodium_crypto.o
+          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-libs
+          path: |
+            build/*.dylib
+            build/*.a

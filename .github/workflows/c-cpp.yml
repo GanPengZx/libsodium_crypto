@@ -20,27 +20,34 @@ jobs:
           .\vcpkg\bootstrap-vcpkg.bat
           .\vcpkg\vcpkg install libsodium:x64-windows
 
-      - name: Compile with MSVC (Static Lib)
+      - name: Compile DLL (Static Runtime)
         run: |
           mkdir build
-          cl.exe /c /I"./src" /I"${{ github.workspace }}\vcpkg\installed\x64-windows\include" src\libsodium_crypto.c /Fo build\libsodium_crypto.obj
-          lib.exe /OUT:build\libsodium_crypto.lib build\libsodium_crypto.obj "${{ github.workspace }}\vcpkg\installed\x64-windows\lib\sodium.lib"
-        shell: cmd
-
-      - name: Compile with MinGW (Static .a)
+          # /MT: 使用静态链接的C运行时库
+          cl.exe /LD /MT /I"./src" `
+                "src\libsodium_crypto.c" `
+                /Fe"build\libsodium_crypto_dll.lib" `
+                /link /LIBPATH:"${{ github.workspace }}\vcpkg\installed\x64-windows\lib" `
+                sodium.lib
+          # 复制DLL
+          copy "${{ github.workspace }}\vcpkg\installed\x64-windows\bin\sodium.dll" build\
+          
+      - name: Compile Static LIB (Static Runtime)
         run: |
-          mkdir build-mingw
-          g++ -c -I"./src" -I"C:\msys64\mingw64\include" src\libsodium_crypto.c -o build-mingw\libsodium_crypto.o
-          ar rcs build-mingw\libsodium_crypto.a build-mingw\libsodium_crypto.o
-        shell: cmd
+          mkdir build
+          # /MT: 静态链接运行时
+          # /c: 只编译不链接
+          cl.exe /c /MT /I"./src" "src\libsodium_crypto.c" /Fo"build\libsodium_crypto_static.obj"
+          # lib.exe 生成 .lib 文件
+          lib.exe /OUT:build\libsodium_crypto_static.lib build\libsodium_crypto_static.obj
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-libs
           path: |
-            build/libsodium_crypto.lib
-            build-mingw/libsodium_crypto.a
+            build/*.lib
+            build/*.dll
 
   build-linux:
     name: Build Linux (SO + A)
@@ -50,20 +57,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsodium-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libsodium-dev
 
-      - name: Compile Libraries (GCC)
+      - name: Compile Libraries
         run: |
           mkdir -p build
           
-          # 静态编译 .a (推荐)
-          gcc -c -fPIC -I./src src/libsodium_crypto.c -o build/libsodium_crypto_static.o
-          ar rcs build/libsodium_crypto.a build/libsodium_crypto_static.o
-          
-          # 动态编译 .so
-          gcc -shared -fPIC -I./src src/libsodium_crypto.c -o build/libsodium_crypto.so -lsodium
+          # 1. 编译动态库 (.so) 并静态链接内部依赖
+          gcc -fPIC -shared \
+              -I./src \
+              ./src/libsodium_crypto.c \
+              -o build/libsodium_crypto.so \
+              -lsodium \
+              -static-libgcc -static-libstdc++
+
+          # 2. 编译静态库 (.a)
+          gcc -c -I./src ./src/libsodium_crypto.c -o build/libsodium_crypto.o
+          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -81,20 +91,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          brew update
-          brew install libsodium
+        run: brew install libsodium
 
-      - name: Compile Libraries (Clang)
+      - name: Compile Libraries
         run: |
           mkdir -p build
           
-          # 静态编译 .a
-          clang -c -I./src src/libsodium_crypto.c -o build/libsodium_crypto_static.o
-          ar rcs build/libsodium_crypto.a build/libsodium_crypto_static.o
-          
-          # 动态编译 .dylib
-          clang -dynamiclib -I./src src/libsodium_crypto.c -o build/libsodium_crypto.dylib -lsodium
+          # 1. 编译动态库 (.dylib)
+          clang -dynamiclib \
+                -I./src \
+                ./src/libsodium_crypto.c \
+                -o build/libsodium_crypto.dylib \
+                -lsodium \
+                -static
+
+          # 2. 编译静态库 (.a)
+          clang -c -I./src ./src/libsodium_crypto.c -o build/libsodium_crypto.o
+          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4

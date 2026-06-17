@@ -23,15 +23,16 @@ jobs:
           C:\msys64\usr\bin\pacman.exe -Syu --noconfirm
           
           Write-Host "Installing GCC and libsodium..."
-          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium --noconfirm
+          # 确保安装了 base-devel 组，里面包含了 ar 工具
+          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium mingw-w64-x86_64-make --noconfirm
 
       - name: Build DLL and Static Library
         run: |
-          # 在项目根目录下创建 build 文件夹
+          # 1. 创建 build 目录
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           
           Write-Host "Building DLL..."
-          # 完全按照你的命令格式，只是加了绝对路径
+          # 编译 DLL
           & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe" -shared `
             -o build/libsodium_crypto.dll `
             src/libsodium_crypto.c `
@@ -40,8 +41,8 @@ jobs:
             -std=c99 `
             -lsodium
 
-          Write-Host "Building Static Library (.a)..."
-          # 你的静态编译命令
+          Write-Host "Building Static Library..."
+          # 编译 .o 对象文件
           & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe" -c `
             -o build/libsodium_crypto.o `
             src/libsodium_crypto.c `
@@ -49,6 +50,10 @@ jobs:
             -O2 `
             -std=c99
             
+          Write-Host "Archiving Static Library..."
+          # 🔥🔥 修复重点 🔥🔥
+          # 1. 加上了 .exe 后缀，确保系统能识别这是一个文件
+          # 2. 使用 & 调用操作符，防止路径中的 - 被 PowerShell 误认为是减法运算符
           & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-ar.exe" rcs `
             build/libsodium_crypto.lib `
             build/libsodium_crypto.o

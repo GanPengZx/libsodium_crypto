@@ -1,72 +1,49 @@
-name: Build Windows (DLL + LIB)
+name: Build Windows (MinGW64)
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-windows:
+  build-mingw:
+    name: Build with MinGW64
     runs-on: windows-latest
-    
-    defaults:
-      run:
-        shell: cmd
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Clone and setup vcpkg
+      - name: Install MinGW and libsodium
         run: |
-          if not exist vcpkg (
-            git clone https://github.com/microsoft/vcpkg.git
-          )
-          cd vcpkg
-          bootstrap-vcpkg.bat
-          cd ..
+          # 1. 安装 MinGW 工具链
+          choco install mingw -y
+          
+          # 2. 使用 pacman 安装预编译好的 libsodium (它会自动处理依赖)
+          # 这会下载 x86_64 架构的 libsodium 及其头文件
+          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-libsodium --noconfirm
 
-      - name: Install libsodium (Static)
+      - name: Prepare folders & Build
         run: |
-          vcpkg\vcpkg.exe install libsodium:x64-windows-static
-
-      - name: Verify installation
-        run: |
-          echo Checking sodium.h...
-          dir vcpkg\installed\x64-windows-static\include\sodium.h
-          echo Checking sodium.lib...
-          dir vcpkg\installed\x64-windows-static\lib\sodium.lib
-
-      - name: Build DLL
-        run: |
+          # 创建输出文件夹
           mkdir build
-          cl.exe /LD /MT ^
-            /I".\include" ^
-            /I".\vcpkg\installed\x64-windows-static\include" ^
-            src\libsodium_crypto.c ^
-            /Fe:build\libsodium_crypto.dll ^
-            /link ^
-            /LIBPATH:.\vcpkg\installed\x64-windows-static\lib ^
-            sodium.lib
-
-      - name: Build Static LIB
-        run: |
-          cl.exe /c /MT ^
-            /I".\include" ^
-            /I".\vcpkg\installed\x64-windows-static\include" ^
-            src\libsodium_crypto.c
-          lib.exe /OUT:build\libsodium_crypto.lib libsodium_crypto.obj
+          
+          # 编译 DLL (生成 .dll 和 import library .a)
+          # -shared: 生成动态链接库
+          # -o: 指定输出文件名
+          x86_64-w64-mingw32-gcc -shared -o build/libsodium_crypto.dll src/libsodium_crypto.c -lsodium
+          
+          # 编译 Static LIB (生成真正的静态库 .a)
+          # -c: 只编译不链接，生成目标文件 .o
+          x86_64-w64-mingw32-gcc -c -o build/libsodium_crypto.o src/libsodium_crypto.c
+          
+          # 将目标文件打包成静态库 .a
+          x86_64-w64-mingw32-ar rcs build/libsodium_crypto.lib build/libsodium_crypto.o
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-libs
+          name: mingw64-libs
           path: |
-            build/libsodium_crypto.dll
-            build/libsodium_crypto.lib
+            build/*.dll
+            build/*.lib

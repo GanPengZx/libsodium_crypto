@@ -1,0 +1,159 @@
+name: Build Libraries
+
+on:
+  push:
+    tags:
+      - 'v*' 
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build on Windows (DLL & LIB)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-libsodium
+
+      - name: Compile Static Library (.lib) and Dynamic Library (.dll)
+        shell: msys2 {0}
+        run: |
+          echo "Compiling for Windows..."
+          mkdir build
+          cd build
+          
+          # 生成静态库
+          gcc -c ../src/libsodium_crypto.c -I../include -O2 -std=c99
+          ar rcs libsodium_crypto.lib libsodium_crypto.o
+          
+          # 生成动态库（静态链接 libsodium，无外部依赖）
+          gcc -shared -o libsodium_crypto.dll ../src/libsodium_crypto.c \
+            -I../include \
+            -L/mingw64/lib \
+            -lsodium \
+            -static \
+            -O2 \
+            -std=c99 \
+            -Wl,--out-implib,libsodium_crypto_implib.lib
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-libs
+          path: |
+            build/libsodium_crypto.dll
+            build/libsodium_crypto.lib
+            build/libsodium_crypto_implib.lib
+
+  build-linux:
+    name: Build on Linux (SO)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev
+
+      - name: Compile Shared Object (.so)
+        run: |
+          echo "Compiling for Linux..."
+          mkdir build
+          cd build
+          
+          # 生成静态库
+          gcc -c ../src/libsodium_crypto.c -I../include -O2 -std=c99
+          ar rcs libsodium_crypto.a libsodium_crypto.o
+          
+          # 生成动态库（静态链接 libsodium）
+          gcc -shared -o libsodium_crypto.so ../src/libsodium_crypto.c \
+            -I../include \
+            -lsodium \
+            -static \
+            -O2 \
+            -std=c99 \
+            -fPIC
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-libs
+          path: |
+            build/libsodium_crypto.so
+            build/libsodium_crypto.a
+
+  build-macos:
+    name: Build on macOS (dylib)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install libsodium
+
+      - name: Compile Dynamic Library (.dylib)
+        run: |
+          echo "Compiling for macOS..."
+          mkdir build
+          cd build
+          
+          # 生成静态库
+          gcc -c ../src/libsodium_crypto.c -I../include -O2 -std=c99
+          ar rcs libsodium_crypto.a libsodium_crypto.o
+          
+          # 生成动态库（静态链接 libsodium）
+          gcc -dynamiclib -o libsodium_crypto.dylib ../src/libsodium_crypto.c \
+            -I../include \
+            -lsodium \
+            -static \
+            -O2 \
+            -std=c99 \
+            -fPIC
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-libs
+          path: |
+            build/libsodium_crypto.dylib
+            build/libsodium_crypto.a
+
+  create-release:
+    name: Create Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create ZIP archives
+        run: |
+          cd dist
+          for dir in */; do
+            zip -r "${dir%/}.zip" "$dir"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+          generate_release_notes: true

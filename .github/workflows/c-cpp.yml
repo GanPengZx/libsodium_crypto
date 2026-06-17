@@ -1,62 +1,62 @@
-name: Build with MinGW64
+name: Build Windows (MinGW64)
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch: # 允许手动触发
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     steps:
-      # 1. 检出代码
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 安装 MinGW-w64 工具链和 libsodium
-      # 使用 Chocolatey 安装 mingw 是最稳定的方式
-      - name: Install MinGW and libsodium
+      - name: Install MSYS2 and libsodium
+        shell: powershell
         run: |
-          choco install mingw -y --force
+          # 1. 下载并安装 MSYS2 (官方标准方式)
+          Write-Host "Downloading MSYS2..."
+          Invoke-WebRequest -Uri 'https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20240113.tar.xz' -OutFile 'msys2.tar.xz'
           
-          # 刷新环境变量，让系统找到刚刚安装的 gcc 和 ar
-          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Extracting MSYS2..."
+          7z x msys2.tar.xz -so | 7z x -si -ttar -oC:\
+          
+          # 2. 更新 MSYS2 并安装 MinGW 和 libsodium
+          Write-Host "Installing MinGW64 and libsodium..."
+          C:\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium --noconfirm"
+          
+          # 3. 将 MinGW 添加到系统 PATH
+          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          # 使用 pacman 安装预编译的 libsodium (这会放到 C:\msys64\mingw64)
-          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-libsodium --noconfirm
-
-      # 3. 验证文件是否存在 (调试用)
-      - name: Verify files
+      - name: Verify installation
+        shell: powershell
         run: |
-          echo "Checking for sodium.h..."
+          Write-Host "Checking gcc version..."
+          gcc --version
+          Write-Host "Checking libsodium..."
           dir C:\msys64\mingw64\include\sodium.h
-          echo "Checking for libsodium.a..."
           dir C:\msys64\mingw64\lib\libsodium.a
 
-      # 4. 编译 DLL 和静态库
-      - name: Build libraries
+      - name: Build DLL and Static Library
+        shell: powershell
         run: |
-          # 设置编译器路径变量，避免写死超长路径
-          $MINGW_BIN = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          # 创建输出目录
+          if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           
-          # --- 编译 DLL ---
-          echo "Building DLL..."
-          & "$MINGW_BIN\x86_64-w64-mingw32-gcc.exe" -shared -o build/libsodium_crypto.dll src/libsodium_crypto.c -lsodium
+          Write-Host "Building DLL..."
+          gcc -shared -o build/libsodium_crypto.dll src/libsodium_crypto.c -lsodium
           
-          # --- 编译静态库 (.a) ---
-          echo "Building Static LIB..."
-          # Step A: 编译成 .o 对象文件
-          & "$MINGW_BIN\x86_64-w64-mingw32-gcc.exe" -c -o build/libsodium_crypto.o src/libsodium_crypto.c
-          # Step B: 使用 ar 打包成 .a 静态库
-          & "$MINGW_BIN\ar.exe" rcs build/libsodium_crypto.lib build/libsodium_crypto.o
+          Write-Host "Building Static Library (.a)..."
+          gcc -c -o build/libsodium_crypto.o src/libsodium_crypto.c
+          ar rcs build/libsodium_crypto.lib build/libsodium_crypto.o
 
-      # 5. 上传成品
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mingw64-output
+          name: windows-mingw-libs
           path: |
-            build/*.dll
-            build/*.lib
+            build/libsodium_crypto.dll
+            build/libsodium_crypto.lib

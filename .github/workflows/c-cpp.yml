@@ -10,38 +10,77 @@ on:
 jobs:
   build-windows:
     name: Build Windows (DLL + LIB)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
     runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: cmd   # ← 用 cmd 最稳，避免 PowerShell 转义把路径搞炸
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 关键：使用专门的 Action 初始化 MSVC 环境
-      - name: Setup MSVC
+      # 1) 装 vcpkg + libsodium（静态三元组，最符合你说的“静态编译”）
+      - name: Install libsodium (vcpkg static x64)
+        run: |
+          IF NOT EXIST vcpkg (
+            git clone https://github.com/microsoft/vcpkg.git
+          )
+          cd vcpkg
+          bootstrap-vcpkg.bat
+          vcpkg.exe install libsodium:x64-windows-static
+          vcpkg.exe integrate install
+          cd ..
+
+      # 2) 验证：打印 sodium.h / sodium.lib 是否真的存在（你不瞎猜）
+      - name: DEBUG show vcpkg layout
+        run: |
+          echo %GITHUB_WORKSPACE%
+          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\include\sodium.h" || echo "!!! sodium.h NOT FOUND !!!"
+          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\lib\sodium.lib" || echo "!!! sodium.lib NOT FOUND !!!"
+
+      # 3) 初始化 MSVC 环境（x64）
+      - name: Setup MSVC (x64)
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      - name: Install libsodium via vcpkg
+      # 4) 编译：DLL + 静态 LIB（/MT = 静态 CRT，更接近你“静态编译”目标）
+      - name: Build
         run: |
-          git clone https://github.com/microsoft/vcpkg
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg install libsodium:x64-windows
+          set "ROOT=%GITHUB_WORKSPACE%"
+          set "VCPKG=%ROOT%\vcpkg"
+          set "INC=/I"%ROOT%\include" /I"%VCPKG%\installed\x64-windows-static\include""
+          set "LIBPATH=/LIBPATH:"%VCPKG%\installed\x64-windows-static\lib""
 
-      - name: Build Static Library (.lib)
-        run: |
-          mkdir build
-          cl.exe /c /MT /I"./include" /I"./vcpkg/installed/x64-windows/include" src\libsodium_crypto.c
-          lib.exe /OUT:build\libsodium_crypto.lib libsodium_crypto.obj
+          if not exist build mkdir build
 
-      - name: Build Dynamic Library (.dll)
-        run: |
-          cl.exe /LD /MT /I"./include" /I"./vcpkg/installed/x64-windows/include" src\libsodium_crypto.c /link /LIBPATH:.\vcpkg\installed\x64-windows\lib sodium.lib /OUT:build\libsodium_crypto.dll
+          echo ----- build DLL -----
+          cl.exe /LD /MT %INC% ^
+            "%ROOT%\src\libsodium_crypto.c" ^
+            /Fe:"%ROOT%\build\libsodium_crypto.dll" ^
+            /link %LIBPATH% sodium.lib
 
-      - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v4
+          echo ----- build STATIC .lib -----
+          cl.exe /c /MT %INC% ^
+            "%ROOT%\src\libsodium_crypto.c" ^
+            /Fo:"%ROOT%\build\libsodium_crypto.obj"
+          lib.exe /OUT:"%ROOT%\build\libsodium_crypto.lib" "%ROOT%\build\libsodium_crypto.obj"
+
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-libs
           path: |
-            build/*.lib
-            build/*.dll
+            build/libsodium_crypto.dll
+            build/libsodium_crypto.lib
 
   build-linux:
     name: Build Linux (SO + A)

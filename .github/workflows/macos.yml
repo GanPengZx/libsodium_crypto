@@ -1,0 +1,53 @@
+name: Build macOS (Clang)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          # 更新 Homebrew 并安装 libsodium
+          brew update
+          brew install libsodium
+
+      - name: Build Dynamic Library (.dylib)
+        run: |
+          mkdir -p build
+          # macOS 使用 -dynamiclib 生成 .dylib
+          gcc -dynamiclib -o build/libsodium_crypto.dylib \
+            src/libsodium_crypto.c \
+            -Iinclude \
+            -O2 \
+            -std=c99 \
+            -lsodium \
+            -fPIC
+
+      - name: Build Static Library (.a)
+        run: |
+          mkdir -p build
+          gcc -c -o build/libsodium_crypto.o \
+            src/libsodium_crypto.c \
+            -Iinclude \
+            -O2 \
+            -std=c99 \
+            -fPIC
+          
+          # macOS 同样使用 ar 工具打包静态库
+          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-libs
+          path: |
+            build/libsodium_crypto.dylib
+            build/libsodium_crypto.a

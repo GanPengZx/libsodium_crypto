@@ -1,49 +1,62 @@
-name: Build Windows (MinGW64)
+name: Build with MinGW64
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: # 允许手动触发
 
 jobs:
-  build-mingw:
-    name: Build with MinGW64
+  build:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout code
+      # 1. 检出代码
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. 安装 MinGW-w64 工具链和 libsodium
+      # 使用 Chocolatey 安装 mingw 是最稳定的方式
       - name: Install MinGW and libsodium
         run: |
-          # 1. 安装 MinGW 工具链
-          choco install mingw -y
+          choco install mingw -y --force
           
-          # 2. 使用 pacman 安装预编译好的 libsodium (它会自动处理依赖)
-          # 这会下载 x86_64 架构的 libsodium 及其头文件
+          # 刷新环境变量，让系统找到刚刚安装的 gcc 和 ar
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # 使用 pacman 安装预编译的 libsodium (这会放到 C:\msys64\mingw64)
           C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-libsodium --noconfirm
 
-      - name: Prepare folders & Build
+      # 3. 验证文件是否存在 (调试用)
+      - name: Verify files
         run: |
-          # 创建输出文件夹
-          mkdir build
-          
-          # 编译 DLL (生成 .dll 和 import library .a)
-          # -shared: 生成动态链接库
-          # -o: 指定输出文件名
-          x86_64-w64-mingw32-gcc -shared -o build/libsodium_crypto.dll src/libsodium_crypto.c -lsodium
-          
-          # 编译 Static LIB (生成真正的静态库 .a)
-          # -c: 只编译不链接，生成目标文件 .o
-          x86_64-w64-mingw32-gcc -c -o build/libsodium_crypto.o src/libsodium_crypto.c
-          
-          # 将目标文件打包成静态库 .a
-          x86_64-w64-mingw32-ar rcs build/libsodium_crypto.lib build/libsodium_crypto.o
+          echo "Checking for sodium.h..."
+          dir C:\msys64\mingw64\include\sodium.h
+          echo "Checking for libsodium.a..."
+          dir C:\msys64\mingw64\lib\libsodium.a
 
+      # 4. 编译 DLL 和静态库
+      - name: Build libraries
+        run: |
+          # 设置编译器路径变量，避免写死超长路径
+          $MINGW_BIN = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          
+          # --- 编译 DLL ---
+          echo "Building DLL..."
+          & "$MINGW_BIN\x86_64-w64-mingw32-gcc.exe" -shared -o build/libsodium_crypto.dll src/libsodium_crypto.c -lsodium
+          
+          # --- 编译静态库 (.a) ---
+          echo "Building Static LIB..."
+          # Step A: 编译成 .o 对象文件
+          & "$MINGW_BIN\x86_64-w64-mingw32-gcc.exe" -c -o build/libsodium_crypto.o src/libsodium_crypto.c
+          # Step B: 使用 ar 打包成 .a 静态库
+          & "$MINGW_BIN\ar.exe" rcs build/libsodium_crypto.lib build/libsodium_crypto.o
+
+      # 5. 上传成品
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mingw64-libs
+          name: mingw64-output
           path: |
             build/*.dll
             build/*.lib

@@ -24,27 +24,39 @@ jobs:
           
           Write-Host "Installing GCC and libsodium..."
           C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium --noconfirm
-          
-          Write-Host "Adding MinGW to PATH..."
-          $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
 
       - name: Build DLL and Static Library
-        working-directory: ./
         run: |
+          # 在项目根目录下创建 build 文件夹
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           
           Write-Host "Building DLL..."
-          x86_64-w64-mingw32-gcc.exe -shared -o libsodium_crypto.dll src/libsodium_crypto.c -Iinclude -O2 -std=c99
+          # 完全按照你的命令格式，只是加了绝对路径
+          & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe" -shared `
+            -o build/libsodium_crypto.dll `
+            src/libsodium_crypto.c `
+            -Iinclude `
+            -O2 `
+            -std=c99 `
+            -lsodium
 
           Write-Host "Building Static Library (.a)..."
-          x86_64-w64-mingw32-gcc.exe -c -o build/libsodium_crypto.o libsodium_crypto.c
-          
-          x86_64-w64-mingw32-ar.exe rcs build/libsodium_crypto.lib build/libsodium_crypto.o
+          # 你的静态编译命令
+          & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe" -c `
+            -o build/libsodium_crypto.o `
+            src/libsodium_crypto.c `
+            -Iinclude `
+            -O2 `
+            -std=c99
+            
+          & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-ar.exe" rcs `
+            build/libsodium_crypto.lib `
+            build/libsodium_crypto.o
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-mingw-libs
           path: |
-            src/build/libsodium_crypto.dll
-            src/build/libsodium_crypto.lib
+            build/libsodium_crypto.dll
+            build/libsodium_crypto.lib

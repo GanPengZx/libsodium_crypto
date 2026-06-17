@@ -1,9 +1,11 @@
-name: Build and Release Libraries
+name: Build Cross-Platform Libraries
 
+# 允许手动触发
 on:
+  workflow_dispatch:
   push:
     tags:
-      - 'v*' # 当推送 v1.0.0 这样的 tag 时触发
+      - 'v*'
 
 jobs:
   build-windows:
@@ -13,45 +15,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install vcpkg
+      # 关键：使用专门的 Action 初始化 MSVC 环境
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install libsodium via vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git
+          git clone https://github.com/microsoft/vcpkg
           .\vcpkg\bootstrap-vcpkg.bat
           .\vcpkg\vcpkg install libsodium:x64-windows
 
-      - name: Compile DLL (Static Runtime)
+      - name: Build Static Library (.lib)
         run: |
-          # 1. 初始化 VS 环境 (关键步骤！)
-          # x64 表示编译64位库，你也可以改成 x86
-          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" x64
-          
-          # 2. 设置 vcpkg 工具链路径
-          $env:VCPKG_ROOT = "$(pwd)\vcpkg"
-          $env:PATH = "$env:VCPKG_ROOT\installed\x64-windows\bin;$env:PATH"
-          
-          # 3. 编译 DLL (-LD 生成动态库, -MT 静态链接运行时)
-          # 注意：把换行符去掉，用 & 连接，或者确保在同一个 cmd 会话中
-          cl.exe /LD /MT /I"./src" /I"$env:VCPKG_ROOT\installed\x64-windows\include" `
-                src\libsodium_crypto.c `
-                /Fe"build\libsodium_crypto.dll" `
-                /link /LIBPATH:"$env:VCPKG_ROOT\installed\x64-windows\lib" sodium.lib
-
-      - name: Compile Static LIB (Static Runtime)
-        run: |
-          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" x64
-          $env:VCPKG_ROOT = "$(pwd)\vcpkg"
-          
-          # 编译静态库需要先生成 .obj，再用 lib.exe 打包
-          cl.exe /c /MT /I"./src" /I"$env:VCPKG_ROOT\installed\x64-windows\include" src\libsodium_crypto.c
+          mkdir build
+          cl.exe /c /MT /I"./include" /I"./vcpkg/installed/x64-windows/include" src\libsodium_crypto.c
           lib.exe /OUT:build\libsodium_crypto.lib libsodium_crypto.obj
+
+      - name: Build Dynamic Library (.dll)
+        run: |
+          cl.exe /LD /MT /I"./include" /I"./vcpkg/installed/x64-windows/include" src\libsodium_crypto.c /link /LIBPATH:.\vcpkg\installed\x64-windows\lib sodium.lib /OUT:build\libsodium_crypto.dll
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-libs
           path: |
-            build/libsodium_crypto.dll
-            build/libsodium_crypto.lib
+            build/*.lib
+            build/*.dll
 
   build-linux:
     name: Build Linux (SO + A)
@@ -61,22 +51,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsodium-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev
 
-      - name: Compile Libraries (GCC)
+      - name: Build Libraries
         run: |
           mkdir -p build
-          
-          # 编译动态库 (.so)
-          gcc -fPIC -shared \
-              -I./src \
-              ./src/libsodium_crypto.c \
-              -o build/libsodium_crypto.so \
-              -lsodium \
-              -static-libgcc -static-libstdc++
-
-          # 编译静态库 (.a)
-          gcc -c -I./src ./src/libsodium_crypto.c -o build/libsodium_crypto.o
+          gcc -fPIC -shared -I./include src/libsodium_crypto.c -o build/libsodium_crypto.so -lsodium -static-libgcc -static-libstdc++
+          gcc -c -I./include src/libsodium_crypto.c -o build/libsodium_crypto.o
           ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
 
       - name: Upload Linux Artifacts
@@ -84,8 +67,8 @@ jobs:
         with:
           name: linux-libs
           path: |
-            build/libsodium_crypto.so
-            build/libsodium_crypto.a
+            build/*.so
+            build/*.a
 
   build-macos:
     name: Build macOS (DYLIB + A)
@@ -93,56 +76,3 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: brew install libsodium
-
-      - name: Compile Libraries (Clang)
-        run: |
-          mkdir -p build
-          
-          # 编译动态库 (.dylib)
-          clang -dynamiclib \
-                -I./src \
-                ./src/libsodium_crypto.c \
-                -o build/libsodium_crypto.dylib \
-                -lsodium
-
-          # 编译静态库 (.a)
-          clang -c -I./src ./src/libsodium_crypto.c -o build/libsodium_crypto.o
-          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-libs
-          path: |
-            build/libsodium_crypto.dylib
-            build/libsodium_crypto.a
-
-  create-release:
-    name: Create Release
-    needs: [build-windows, build-linux, build-macos]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Create ZIP archives
-        run: |
-          cd dist
-          for dir in */; do
-            zip -r "${dir%/}.zip" "$dir"
-          done
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.zip
-          generate_release_notes: true

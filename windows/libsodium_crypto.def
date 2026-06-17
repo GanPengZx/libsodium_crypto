@@ -1,0 +1,12 @@
+LIBRARY libsodium_crypto
+EXPORTS
+    ls_crypto_init
+    ls_crypto_cleanup
+    ls_crypto_check_password_strength
+    ls_crypto_encrypt
+    ls_crypto_decrypt
+    ls_crypto_free
+    ls_crypto_base64_encode
+    ls_crypto_base64_decode
+    ls_crypto_get_version
+    ls_crypto_default_config

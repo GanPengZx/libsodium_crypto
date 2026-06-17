@@ -23,14 +23,14 @@ jobs:
           C:\msys64\usr\bin\pacman.exe -Syu --noconfirm
           
           Write-Host "Installing GCC and libsodium..."
-          # 确保安装了 base-devel 组，里面包含了 ar 工具
-          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium mingw-w64-x86_64-make --noconfirm
+          # 确保安装了 binutils，它包含了 ar.exe
+          C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium mingw-w64-x86_64-binutils --noconfirm
 
       - name: Build DLL and Static Library
         run: |
           # 1. 创建 build 目录
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
-          
+
           Write-Host "Building DLL..."
           # 编译 DLL
           & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-gcc.exe" -shared `
@@ -51,10 +51,14 @@ jobs:
             -std=c99
             
           Write-Host "Archiving Static Library..."
-          # 🔥🔥 修复重点 🔥🔥
-          # 1. 加上了 .exe 后缀，确保系统能识别这是一个文件
-          # 2. 使用 & 调用操作符，防止路径中的 - 被 PowerShell 误认为是减法运算符
-          & "C:/msys64/mingw64/bin/x86_64-w64-mingw32-ar.exe" rcs `
+          # 先删除旧的 .lib 文件，防止重命名冲突
+          if (Test-Path build/libsodium_crypto.lib) {
+            Remove-Item build/libsodium_crypto.lib -Force
+          }
+          
+          # 🔥🔥 修正点在这里 🔥🔥
+          # 文件名改为 ar.exe，与你截图里的文件名保持一致
+          & "C:/msys64/mingw64/bin/ar.exe" rcs `
             build/libsodium_crypto.lib `
             build/libsodium_crypto.o
 

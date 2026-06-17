@@ -9,45 +9,44 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install libsodium and GCC via MSYS2
-        shell: powershell
+      - name: Setup MSYS2 and Install Dependencies
         run: |
-          Write-Host "Updating MSYS2 packages..."
+          Write-Host "Updating MSYS2..."
           C:\msys64\usr\bin\pacman.exe -Syu --noconfirm
           
           Write-Host "Installing GCC and libsodium..."
           C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-gcc mingw-w64-x86_64-libsodium --noconfirm
 
-      - name: Verify Environment
-        shell: powershell
-        run: |
-          Write-Host "GCC Version:"
-          C:\msys64\mingw64\bin\gcc.exe --version
-          Write-Host "Checking libsodium headers:"
-          dir C:\msys64\mingw64\include\sodium.h
-
       - name: Build DLL and Static Library
-        shell: powershell
+        # 关键：将工作目录切换到 src 文件夹
+        working-directory: ./src
         run: |
-          # Create build directory
+          # 创建 build 文件夹（现在在 src 目录下）
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           
           Write-Host "Building DLL..."
-          C:\msys64\mingw64\bin\x86_64-w64-mingw32-gcc.exe -shared `
+          # -I../include 表示去上一级目录的 include 文件夹找头文件
+          x86_64-w64-mingw32-gcc.exe -shared `
+            -I../include `
             -o build/libsodium_crypto.dll `
-            src/libsodium_crypto.c `
+            libsodium_crypto.c `
             -lsodium
-          
+
           Write-Host "Building Static Library (.a)..."
-          C:\msys64\mingw64\bin\x86_64-w64-mingw32-gcc.exe -c `
+          x86_64-w64-mingw32-gcc.exe -c `
+            -I../include `
             -o build/libsodium_crypto.o `
-            src/libsodium_crypto.c
+            libsodium_crypto.c
           
-          C:\msys64\mingw64\bin\ar.exe rcs `
+          x86_64-w64-mingw32-ar.exe rcs `
             build/libsodium_crypto.lib `
             build/libsodium_crypto.o
 
@@ -56,5 +55,5 @@ jobs:
         with:
           name: windows-mingw-libs
           path: |
-            build/libsodium_crypto.dll
-            build/libsodium_crypto.lib
+            src/build/libsodium_crypto.dll
+            src/build/libsodium_crypto.lib

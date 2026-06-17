@@ -1,4 +1,4 @@
-name: Build macOS (Clang)
+name: Build macOS (Universal)
 
 on:
   workflow_dispatch:
@@ -22,10 +22,14 @@ jobs:
       - name: Build Dynamic Library (.dylib)
         run: |
           mkdir -p build
-          # macOS 使用 -dynamiclib 生成 .dylib
-          gcc -dynamiclib -o build/libsodium_crypto.dylib \
+          # 使用 clang 编译动态库
+          # -dynamiclib: 生成 macOS 动态库
+          # $(brew --prefix libsodium): 自动获取 Homebrew 的安装路径（解决路径问题）
+          clang -dynamiclib -o build/libsodium_crypto.dylib \
             src/libsodium_crypto.c \
             -Iinclude \
+            -I$(brew --prefix libsodium)/include \
+            -L$(brew --prefix libsodium)/lib \
             -O2 \
             -std=c99 \
             -lsodium \
@@ -34,14 +38,16 @@ jobs:
       - name: Build Static Library (.a)
         run: |
           mkdir -p build
-          gcc -c -o build/libsodium_crypto.o \
+          # 编译目标文件
+          clang -c -o build/libsodium_crypto.o \
             src/libsodium_crypto.c \
             -Iinclude \
+            -I$(brew --prefix libsodium)/include \
             -O2 \
             -std=c99 \
             -fPIC
           
-          # macOS 同样使用 ar 工具打包静态库
+          # 打包静态库
           ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
 
       - name: Upload Artifacts

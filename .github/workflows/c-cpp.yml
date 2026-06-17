@@ -29,28 +29,17 @@ jobs:
           $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
 
       - name: Build DLL and Static Library
-        working-directory: ./src
+        working-directory: ./
         run: |
-          # 创建 build 文件夹（现在在 src 目录下）
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           
           Write-Host "Building DLL..."
-          # -I../include 表示去上一级目录的 include 文件夹找头文件
-          x86_64-w64-mingw32-gcc.exe -shared `
-            -I../include `
-            -o build/libsodium_crypto.dll `
-            libsodium_crypto.c `
-            -lsodium
+          x86_64-w64-mingw32-gcc.exe -shared -o libsodium_crypto.dll src/libsodium_crypto.c -Iinclude -O2 -std=c99
 
           Write-Host "Building Static Library (.a)..."
-          x86_64-w64-mingw32-gcc.exe -c `
-            -I../include `
-            -o build/libsodium_crypto.o `
-            libsodium_crypto.c
+          x86_64-w64-mingw32-gcc.exe -c -o build/libsodium_crypto.o libsodium_crypto.c
           
-          x86_64-w64-mingw32-ar.exe rcs `
-            build/libsodium_crypto.lib `
-            build/libsodium_crypto.o
+          x86_64-w64-mingw32-ar.exe rcs build/libsodium_crypto.lib build/libsodium_crypto.o
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

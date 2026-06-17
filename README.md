@@ -46,7 +46,7 @@ gcc -shared -o libsodium_crypto.dylib src/libsodium_crypto.c -Iinclude -O2 -std=
 
 ### 1. 下载预编译库
 
-从 [Releases](https://github.com/yourusername/libsodium_crypto/releases) 下载适合你系统的库文件：
+从 [Releases](https://github.com/GanPengZx/libsodium_crypto/releases) 下载适合你系统的库文件：
 - Windows: `libsodium_crypto.dll` + `libsodium_crypto.lib`
 - Linux: `libsodium_crypto.so`
 - macOS: `libsodium_crypto.dylib`

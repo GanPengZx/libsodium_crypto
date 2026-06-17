@@ -1,16 +1,6 @@
-name: Build Cross-Platform Libraries
+name: Build Windows (DLL + LIB)
 
-# 允许手动触发
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
-
-jobs:
-  build-windows:
-    name: Build Windows (DLL + LIB)
-
+# 允许手动点击运行
 on:
   workflow_dispatch:
   push:
@@ -21,40 +11,46 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
+    # 使用 CMD 而不是 PowerShell，避免路径转义错误
     defaults:
       run:
-        shell: cmd   # ← 用 cmd 最稳，避免 PowerShell 转义把路径搞炸
+        shell: cmd
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # 1) 装 vcpkg + libsodium（静态三元组，最符合你说的“静态编译”）
-      - name: Install libsodium (vcpkg static x64)
+      # 1. 安装 libsodium (静态版)
+      # 使用 x64-windows-static 三元组，确保生成 .lib 文件
+      - name: Install libsodium via vcpkg
         run: |
+          echo Installing vcpkg and libsodium...
           IF NOT EXIST vcpkg (
             git clone https://github.com/microsoft/vcpkg.git
           )
           cd vcpkg
           bootstrap-vcpkg.bat
           vcpkg.exe install libsodium:x64-windows-static
-          vcpkg.exe integrate install
           cd ..
 
-      # 2) 验证：打印 sodium.h / sodium.lib 是否真的存在（你不瞎猜）
-      - name: DEBUG show vcpkg layout
+      # 2. 调试：确认 sodium 是否真的装好了
+      # 如果这一步报错，说明 vcpkg 没装成功
+      - name: Verify libsodium installation
         run: |
-          echo %GITHUB_WORKSPACE%
-          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\include\sodium.h" || echo "!!! sodium.h NOT FOUND !!!"
-          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\lib\sodium.lib" || echo "!!! sodium.lib NOT FOUND !!!"
+          echo Verifying sodium.h...
+          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\include\sodium.h"
+          echo Verifying sodium.lib...
+          dir /s /b "%GITHUB_WORKSPACE%\vcpkg\installed\x64-windows-static\lib\sodium.lib"
 
-      # 3) 初始化 MSVC 环境（x64）
+      # 3. 初始化 MSVC 编译器环境
       - name: Setup MSVC (x64)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      # 4) 编译：DLL + 静态 LIB（/MT = 静态 CRT，更接近你“静态编译”目标）
-      - name: Build
+      # 4. 编译
+      # 使用绝对路径，确保 cl.exe 一定能找到头文件和库文件
+      - name: Build DLL and Static LIB
         run: |
           set "ROOT=%GITHUB_WORKSPACE%"
           set "VCPKG=%ROOT%\vcpkg"
@@ -63,73 +59,23 @@ jobs:
 
           if not exist build mkdir build
 
-          echo ----- build DLL -----
+          echo ----- Compiling DLL (libsodium_crypto.dll) -----
           cl.exe /LD /MT %INC% ^
             "%ROOT%\src\libsodium_crypto.c" ^
             /Fe:"%ROOT%\build\libsodium_crypto.dll" ^
             /link %LIBPATH% sodium.lib
 
-          echo ----- build STATIC .lib -----
+          echo ----- Compiling Static LIB (libsodium_crypto.lib) -----
           cl.exe /c /MT %INC% ^
             "%ROOT%\src\libsodium_crypto.c" ^
             /Fo:"%ROOT%\build\libsodium_crypto.obj"
           lib.exe /OUT:"%ROOT%\build\libsodium_crypto.lib" "%ROOT%\build\libsodium_crypto.obj"
 
-      - uses: actions/upload-artifact@v4
+      # 5. 上传成品
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: windows-libs
           path: |
             build/libsodium_crypto.dll
             build/libsodium_crypto.lib
-
-  build-linux:
-    name: Build Linux (SO + A)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsodium-dev
-
-      - name: Build Libraries
-        run: |
-          mkdir -p build
-          gcc -fPIC -shared -I./include src/libsodium_crypto.c -o build/libsodium_crypto.so -lsodium -static-libgcc -static-libstdc++
-          gcc -c -I./include src/libsodium_crypto.c -o build/libsodium_crypto.o
-          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
-
-      - name: Upload Linux Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-libs
-          path: |
-            build/*.so
-            build/*.a
-
-  build-macos:
-    name: Build macOS (DYLIB + A)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: brew install libsodium
-
-      - name: Build Libraries
-        run: |
-          mkdir -p build
-          clang -dynamiclib -I./include src/libsodium_crypto.c -o build/libsodium_crypto.dylib -lsodium
-          clang -c -I./include src/libsodium_crypto.c -o build/libsodium_crypto.o
-          ar rcs build/libsodium_crypto.a build/libsodium_crypto.o
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-libs
-          path: |
-            build/*.dylib
-            build/*.a
